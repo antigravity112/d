@@ -1,0 +1,128 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import mean_squared_error
+
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import SimpleRNN, LSTM, GRU, Dense
+
+# 1. Load dataset from local directory
+df = pd.read_csv("dataset/data.csv")
+
+print(df.head())
+
+# 2. Select the column to predict
+data = df["Passengers"].values.astype("float32").reshape(-1, 1)
+
+# 3. Normalize data
+scaler = MinMaxScaler(feature_range=(0, 1))
+data = scaler.fit_transform(data)
+
+# 4. Create sequences
+LOOK_BACK = 12
+X, y = [], []
+
+for i in range(len(data) - LOOK_BACK):
+    X.append(data[i:i + LOOK_BACK])
+    y.append(data[i + LOOK_BACK])
+
+X = np.array(X, dtype=np.float32)
+y = np.array(y, dtype=np.float32)
+
+# 5. Split data chronologically
+split = int(len(X) * 0.8)
+
+X_train, X_test = X[:split], X[split:]
+y_train, y_test = y[:split], y[split:]
+
+print("Training shape:", X_train.shape)
+print("Testing shape:", X_test.shape)
+
+# 6. Train and evaluate a model
+def run_model(name, layer):
+
+    model = Sequential([
+        layer(50, activation="tanh",
+              input_shape=(LOOK_BACK, 1)),
+        Dense(1)
+    ])
+
+    model.compile(
+        optimizer="adam",
+        loss="mse"
+    )
+
+    model.fit(
+        X_train, y_train,
+        epochs=100,
+        batch_size=8,
+        verbose=0
+    )
+
+    # Predictions
+    train_pred = model.predict(X_train, verbose=0)
+    test_pred = model.predict(X_test, verbose=0)
+
+    # Convert to original scale
+    train_pred = scaler.inverse_transform(train_pred)
+    test_pred = scaler.inverse_transform(test_pred)
+
+    actual_train = scaler.inverse_transform(y_train)
+    actual_test = scaler.inverse_transform(y_test)
+
+    # Calculate RMSE
+    train_rmse = np.sqrt(
+        mean_squared_error(actual_train, train_pred)
+    )
+
+    test_rmse = np.sqrt(
+        mean_squared_error(actual_test, test_pred)
+    )
+
+    print("\n", name)
+    print("Train RMSE:", round(train_rmse, 2))
+    print("Test RMSE:", round(test_rmse, 2))
+
+    return test_pred, test_rmse, train_rmse
+
+
+# 7. Run RNN
+rnn_pred, rnn_rmse, rnn_train = run_model(
+    "RNN", SimpleRNN
+)
+
+# 8. Run LSTM
+lstm_pred, lstm_rmse, lstm_train = run_model(
+    "LSTM", LSTM
+)
+
+# 9. Run GRU
+gru_pred, gru_rmse, gru_train = run_model(
+    "GRU", GRU
+)
+
+# 10. Convert actual test values to original scale
+actual = scaler.inverse_transform(y_test)
+
+# 11. Plot predictions
+plt.figure(figsize=(10, 5))
+
+plt.plot(actual, label="Actual")
+plt.plot(rnn_pred, label="RNN")
+plt.plot(lstm_pred, label="LSTM")
+plt.plot(gru_pred, label="GRU")
+
+plt.title("RNN vs LSTM vs GRU")
+plt.xlabel("Test Time Step")
+plt.ylabel("Actual Value")
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# 12. Compare results
+print("\nFINAL RMSE COMPARISON")
+print("RNN :", round(rnn_rmse, 2))
+print("LSTM:", round(lstm_rmse, 2))
+print("GRU :", round(gru_rmse, 2))
