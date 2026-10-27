@@ -104,3 +104,66 @@ for r in range(rows):
         else:
             line += " . "
     print(line)
+
+# ============================================
+# PLOT THE LEARNED MAZE PATH
+# ============================================
+
+import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
+
+fig, ax = plt.subplots(figsize=(8, 8))
+
+# Draw maze: white = free cell, black = wall
+ax.imshow(maze, cmap=ListedColormap(["white", "black"]))
+
+# Grid lines
+ax.set_xticks(np.arange(-0.5, cols, 1))
+ax.set_yticks(np.arange(-0.5, rows, 1))
+ax.grid(color="gray", linewidth=1)
+
+ax.set_xticklabels([])
+ax.set_yticklabels([])
+
+# Plot path if it was found
+if len(path) > 1 and path[-1] == goal:
+    path_rows = [p[0] for p in path]
+    path_cols = [p[1] for p in path]
+
+    # Draw route
+    ax.plot(
+        path_cols, path_rows,
+        color="blue", linewidth=3,
+        marker="o", markersize=5,
+        label="Learned Path"
+    )
+
+    # Draw directional arrows
+    for i in range(len(path) - 1):
+        r1, c1 = path[i]
+        r2, c2 = path[i + 1]
+
+        ax.annotate(
+            "",
+            xy=(c2, r2),
+            xytext=(c1, r1),
+            arrowprops=dict(arrowstyle="->", color="red", lw=1.5)
+        )
+
+# Mark start and goal
+ax.scatter(start[1], start[0], color="green", s=220,
+           marker="o", edgecolors="black", label="Start (S)")
+
+ax.scatter(goal[1], goal[0], color="red", s=250,
+           marker="*", edgecolors="black", label="Goal (G)")
+
+ax.text(start[1], start[0], "S", ha="center", va="center",
+        color="white", fontweight="bold")
+
+ax.text(goal[1], goal[0], "G", ha="center", va="center",
+        color="white", fontweight="bold")
+
+ax.set_title("Q-Learning: Learned Maze Path", fontsize=14)
+ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1))
+plt.tight_layout()
+plt.show()
