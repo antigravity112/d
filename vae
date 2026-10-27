@@ -1,55 +1,62 @@
-# Variational Autoencoder (VAE) for MNIST Dataset
 
-# 1. Import libraries
+# Variational Autoencoder (VAE) for MNIST
+
 import numpy as np
 import tensorflow as tf
 import matplotlib.pyplot as plt
+
 from tensorflow.keras.datasets import mnist
-from tensorflow.keras.layers import Input, Dense, Lambda
+from tensorflow.keras.layers import Input, Dense, Lambda, Layer
 from tensorflow.keras.models import Model
 
-# 2. Load MNIST
-(x_train, _), (_, _) = mnist.load_data()
+# 1. Load and preprocess MNIST
+(x_train, y_train), (_, _) = mnist.load_data()
+
 x_train = x_train.astype("float32").reshape(-1, 784) / 255.0
 
-# 3. Encoder
+# 2. Encoder
 inp = Input(shape=(784,))
+
 x = Dense(256, activation="relu")(inp)
 x = Dense(64, activation="relu")(x)
 
-mean = Dense(2)(x)
-logvar = Dense(2)(x)
+z_mean = Dense(2, name="z_mean")(x)
+z_logvar = Dense(2, name="z_logvar")(x)
 
-# 4. Reparameterization
+# 3. Reparameterization
 def sampling(args):
     mean, logvar = args
     eps = tf.random.normal(shape=tf.shape(mean))
     return mean + tf.exp(0.5 * logvar) * eps
 
-z = Lambda(sampling)([mean, logvar])
+z_sample = Lambda(sampling)([z_mean, z_logvar])
 
-# Add KL divergence loss
-class KLLoss(tf.keras.layers.Layer):
+# 4. Add KL divergence loss
+class KLLoss(Layer):
     def call(self, inputs):
-        mean, logvar = inputs
-        kl = -0.5 * tf.reduce_sum(
-            1 + logvar - tf.square(mean) - tf.exp(logvar), axis=1
-        )
-        self.add_loss(tf.reduce_mean(kl))
-        return mean
+        mean, logvar, z = inputs
 
-mean = KLLoss()([mean, logvar])
+        kl = -0.5 * tf.reduce_sum(
+            1 + logvar - tf.square(mean) - tf.exp(logvar),
+            axis=1
+        )
+
+        self.add_loss(tf.reduce_mean(kl))
+        return z
+
+z = KLLoss()([z_mean, z_logvar, z_sample])
 
 # 5. Decoder
 decoder_input = Input(shape=(2,))
+
 d = Dense(64, activation="relu")(decoder_input)
 d = Dense(256, activation="relu")(d)
 out = Dense(784, activation="sigmoid")(d)
 
 decoder = Model(decoder_input, out)
-output = decoder(z)
 
-# 6. Build and train VAE
+# 6. Build VAE
+output = decoder(z)
 vae = Model(inp, output)
 
 def vae_loss(y_true, y_pred):
@@ -57,31 +64,87 @@ def vae_loss(y_true, y_pred):
     return bce * 784
 
 vae.compile(optimizer="adam", loss=vae_loss)
-vae.fit(x_train, x_train, epochs=5, batch_size=128)
 
-# 7. Generate a digit
-z = np.random.randn(1, 2).astype("float32")
-digit = decoder.predict(z, verbose=0).reshape(28, 28)
+# 7. Train
+history = vae.fit(
+    x_train, x_train,
+    epochs=5,
+    batch_size=128,
+    validation_split=0.1
+)
 
-plt.imshow(digit, cmap="gray")
-plt.title("VAE Generated Digit")
-plt.axis("off")
+# PLOT 1: Training and validation loss
+plt.figure(figsize=(7, 4))
+plt.plot(history.history["loss"], label="Training Loss")
+plt.plot(history.history["val_loss"], label="Validation Loss")
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.title("VAE Training Loss")
+plt.legend()
+plt.grid(True)
 plt.show()
 
-# Autoencoder for Sentiment Analysis on IMDB Dataset
-# 1. Import libraries
+# 8. Generate 10 digits
+z_random = np.random.randn(10, 2).astype("float32")
+digits = decoder.predict(z_random, verbose=0)
+
+# PLOT 2: Generated digits
+plt.figure(figsize=(12, 3))
+
+for i in range(10):
+    plt.subplot(2, 5, i + 1)
+    plt.imshow(digits[i].reshape(28, 28), cmap="gray")
+    plt.axis("off")
+    plt.title(f"Digit {i + 1}")
+
+plt.suptitle("VAE Generated MNIST Digits")
+plt.tight_layout()
+plt.show()
+
+# 9. Encoder for latent-space visualization
+encoder = Model(inp, z_mean)
+
+# Use a subset to make the plot faster
+latent = encoder.predict(x_train[:5000], verbose=0)
+
+# PLOT 3: Latent space
+plt.figure(figsize=(8, 6))
+scatter = plt.scatter(
+    latent[:, 0], latent[:, 1],
+    c=y_train[:5000], cmap="tab10", s=5
+)
+plt.xlabel("Latent Dimension 1")
+plt.ylabel("Latent Dimension 2")
+plt.title("VAE Latent Space for MNIST")
+plt.colorbar(scatter, label="Digit Class")
+plt.show()
+
+
+# Autoencoder for IMDB Sentiment Analysis
+
 import numpy as np
+import matplotlib.pyplot as plt
+import tensorflow as tf
+
 from tensorflow.keras.datasets import imdb
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.layers import Input, Dense
 from tensorflow.keras.models import Model
-from sklearn.metrics import accuracy_score, classification_report
 
-# 2. Load and preprocess data
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    ConfusionMatrixDisplay
+)
+from sklearn.decomposition import PCA
+
+# 1. Load and preprocess IMDB data
 vocab_size = 10000
 max_len = 200
 
-(x_train, y_train), (x_test, y_test) = imdb.load_data(num_words=vocab_size)
+(x_train, y_train), (x_test, y_test) = imdb.load_data(
+    num_words=vocab_size
+)
 
 x_train = pad_sequences(x_train, maxlen=max_len, padding="post")
 x_test = pad_sequences(x_test, maxlen=max_len, padding="post")
@@ -89,7 +152,7 @@ x_test = pad_sequences(x_test, maxlen=max_len, padding="post")
 x_train = x_train.astype("float32") / vocab_size
 x_test = x_test.astype("float32") / vocab_size
 
-# 3. Build autoencoder
+# 2. Build autoencoder
 inp = Input(shape=(max_len,))
 
 x = Dense(128, activation="relu")(inp)
@@ -101,31 +164,119 @@ x = Dense(128, activation="relu")(x)
 decoded = Dense(max_len, activation="sigmoid")(x)
 
 autoencoder = Model(inp, decoded)
+
 autoencoder.compile(optimizer="adam", loss="mse")
 
-# 4. Train autoencoder
-autoencoder.fit(x_train, x_train, epochs=5, batch_size=128)
+# 3. Train autoencoder
+ae_history = autoencoder.fit(
+    x_train, x_train,
+    epochs=5,
+    batch_size=128,
+    validation_split=0.1
+)
 
-# 5. Extract compressed features
+# PLOT 1: Autoencoder loss
+plt.figure(figsize=(7, 4))
+plt.plot(ae_history.history["loss"], label="Training Loss")
+plt.plot(ae_history.history["val_loss"], label="Validation Loss")
+plt.xlabel("Epoch")
+plt.ylabel("MSE Loss")
+plt.title("Autoencoder Training Loss")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# 4. Extract compressed features
 encoder = Model(inp, encoded)
+
 X_train = encoder.predict(x_train, verbose=0)
 X_test = encoder.predict(x_test, verbose=0)
 
-# 6. Build sentiment classifier
+# 5. Build sentiment classifier
 inp2 = Input(shape=(32,))
+
 x = Dense(16, activation="relu")(inp2)
 out = Dense(1, activation="sigmoid")(x)
 
 classifier = Model(inp2, out)
-classifier.compile(optimizer="adam",
-                   loss="binary_crossentropy",
-                   metrics=["accuracy"])
 
-# 7. Train classifier
-classifier.fit(X_train, y_train, epochs=5, batch_size=128)
+classifier.compile(
+    optimizer="adam",
+    loss="binary_crossentropy",
+    metrics=["accuracy"]
+)
 
-# 8. Evaluate
-pred = (classifier.predict(X_test, verbose=0) > 0.5).astype(int).ravel()
+# 6. Train classifier
+clf_history = classifier.fit(
+    X_train, y_train,
+    epochs=5,
+    batch_size=128,
+    validation_split=0.1
+)
+
+# PLOT 2: Classifier accuracy
+plt.figure(figsize=(7, 4))
+plt.plot(clf_history.history["accuracy"], label="Training Accuracy")
+plt.plot(
+    clf_history.history["val_accuracy"],
+    label="Validation Accuracy"
+)
+plt.xlabel("Epoch")
+plt.ylabel("Accuracy")
+plt.title("Sentiment Classifier Accuracy")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# PLOT 3: Classifier loss
+plt.figure(figsize=(7, 4))
+plt.plot(clf_history.history["loss"], label="Training Loss")
+plt.plot(clf_history.history["val_loss"], label="Validation Loss")
+plt.xlabel("Epoch")
+plt.ylabel("Binary Crossentropy Loss")
+plt.title("Sentiment Classifier Loss")
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# 7. Evaluate on test data
+probabilities = classifier.predict(X_test, verbose=0)
+pred = (probabilities > 0.5).astype(int).ravel()
 
 print("Accuracy:", accuracy_score(y_test, pred))
-print(classification_report(y_test, pred))
+print("\nClassification Report:")
+print(classification_report(y_test, pred, target_names=[
+    "Negative", "Positive"
+]))
+
+# PLOT 4: Confusion matrix
+ConfusionMatrixDisplay.from_predictions(
+    y_test,
+    pred,
+    display_labels=["Negative", "Positive"],
+    cmap="Blues"
+)
+plt.title("Sentiment Analysis Confusion Matrix")
+plt.show()
+
+# PLOT 5: Compressed feature visualization using PCA
+# Display a subset to keep the plot readable
+pca = PCA(n_components=2)
+
+features_2d = pca.fit_transform(X_test[:2000])
+
+plt.figure(figsize=(8, 6))
+scatter = plt.scatter(
+    features_2d[:, 0],
+    features_2d[:, 1],
+    c=y_test[:2000],
+    cmap="coolwarm",
+    s=10,
+    alpha=0.7
+)
+
+plt.xlabel("Principal Component 1")
+plt.ylabel("Principal Component 2")
+plt.title("Compressed IMDB Features: PCA Visualization")
+plt.colorbar(scatter, label="Sentiment (0=Negative, 1=Positive)")
+plt.show()
